@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מחולל ברקודים</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Heebo', 'Rubik', 'Arial Hebrew', sans-serif;
+    background: #f5f5f0;
+    margin: 0;
+    padding: 24px;
+    color: #1a1a1a;
+  }
+  .container { max-width: 980px; margin: 0 auto; }
+  .header {
+    background: white;
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 16px;
+    border: 1px solid #e5e5e0;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  .sub { color: #6a6a65; font-size: 14px; }
+  .panel {
+    background: white;
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 16px;
+    border: 1px solid #e5e5e0;
+  }
+  .step-label {
+    display: inline-block;
+    background: #1a1a1a;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 24px;
+    font-size: 13px;
+    margin-left: 8px;
+  }
+  .step-title { font-size: 16px; font-weight: 500; margin-bottom: 16px; display: flex; align-items: center; }
+  .drop {
+    border: 2px dashed #c5c5c0;
+    border-radius: 12px;
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    background: #fafaf7;
+  }
+  .drop:hover, .drop.dragover { border-color: #1a1a1a; background: #f0f0e8; }
+  .drop .big { font-size: 16px; font-weight: 500; }
+  .drop .small { font-size: 13px; color: #6a6a65; margin-top: 6px; }
+  input[type=file] { display: none; }
+  .file-name { margin-top: 12px; font-size: 14px; color: #2a6b3a; font-weight: 500; }
+  .row { display: grid; gap: 12px; margin-bottom: 12px; }
+  .row-2 { grid-template-columns: 1fr 1fr; }
+  .row-3 { grid-template-columns: 1fr 1fr 1fr; }
+  label { display: block; font-size: 13px; color: #6a6a65; margin-bottom: 4px; }
+  select, input[type=number], input[type=text] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d5d5d0;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    background: white;
+  }
+  button {
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid #1a1a1a;
+    background: #1a1a1a;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { background: #2a2a2a; }
+  button.ghost { background: white; color: #1a1a1a; }
+  button.ghost:hover { background: #f0f0e8; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .grid {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .cell {
+    border: 1px solid #d5d5d0;
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: white;
+    page-break-inside: avoid;
+    min-height: 130px;
+    justify-content: center;
+    gap: 4px;
+  }
+  .cell .name {
+    font-size: 12px;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.3;
+    width: 100%;
+    word-wrap: break-word;
+  }
+  .cell svg { max-width: 100%; height: auto; display: block; }
+  .cell .code { font-size: 11px; color: #444; font-family: monospace; margin-top: -2px; }
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+  .hidden { display: none; }
+  .hint { font-size: 12px; color: #8a8a85; margin-top: 4px; }
+  .page {
+    background: white;
+    padding: 12mm;
+    box-shadow: 0 0 0 1px #e5e5e0;
+    margin: 0 auto;
+  }
+  .page + .page { margin-top: 14px; }
+  #pdf-area { padding: 14px; background: #ececec; border-radius: 12px; }
+  .summary { font-size: 13px; color: #444; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>מחולל ברקודים מאקסל</h1>
+    <div class="sub">מעלים קובץ Excel עם שמות פריטים וקודים — מקבלים PDF להדפסה עם ברקודים מסודרים.</div>
+  </div>
+
+  <div class="panel">
+    <div class="step-title"><span class="step-label">1</span> העלאת קובץ</div>
+    <div class="drop" id="drop">
+      <div class="big">גרור לכאן קובץ Excel או לחץ לבחירה</div>
+      <div class="small">פורמטים נתמכים: .xlsx, .xls, .csv</div>
+    </div>
+    <input type="file" id="file" accept=".xlsx,.xls,.csv">
+    <div id="file-name" class="file-name hidden"></div>
+  </div>
+
+  <div class="panel hidden" id="map-panel">
+    <div class="step-title"><span class="step-label">2</span> זיהוי עמודות</div>
+    <div class="row row-3">
+      <div>
+        <label>גיליון</label>
+        <select id="sheet"></select>
+      </div>
+      <div>
+        <label>עמודת שם המוצר</label>
+        <select id="col-name"></select>
+      </div>
+      <div>
+        <label>עמודת ערך הברקוד</label>
+        <select id="col-code"></select>
+      </div>
+    </div>
+    <div class="row row-2">
+      <div>
+        <label>שורת כותרת (אם יש)</label>
+        <select id="header-row"></select>
+        <div class="hint">השורה שמכילה את שמות העמודות — נדלג עליה.</div>
+      </div>
+      <div>
+        <label>סוג ברקוד</label>
+        <select id="bc-format">
+          <option value="CODE128" selected>Code128 (מומלץ)</option>
+          <option value="CODE39">Code39</option>
+          <option value="EAN13">EAN-13</option>
+          <option value="EAN8">EAN-8</option>
+          <option value="UPC">UPC</option>
+        </select>
+      </div>
+    </div>
+    <div class="row row-3">
+      <div>
+        <label>ברקודים בשורה</label>
+        <select id="cols">
+          <option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
+        </select>
+      </div>
+      <div>
+        <label>שורות בעמוד</label>
+        <select id="rows">
+          <option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option><option>10</option>
+        </select>
+      </div>
+      <div>
+        <label>גובה ברקוד</label>
+        <select id="bc-height">
+          <option value="30">נמוך</option>
+          <option value="40" selected>בינוני</option>
+          <option value="55">גבוה</option>
+        </select>
+      </div>
+    </div>
+    <div class="row row-2">
+      <div>
+        <label>שם הקובץ להורדה</label>
+        <input type="text" id="out-name" placeholder="ברקודים">
+        <div class="hint">הסיומת <span style="font-family: monospace; direction: ltr;">.pdf</span> תתווסף אוטומטית.</div>
+      </div>
+      <div>
+        <label>תוסיף תאריך לשם?</label>
+        <select id="add-date">
+          <option value="1" selected>כן — ‎2026-05-19 בסוף השם</option>
+          <option value="0">לא</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="build">צור תצוגה מקדימה</button>
+      <span class="summary" id="summary"></span>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="preview-panel">
+    <div class="step-title"><span class="step-label">3</span> תצוגה מקדימה ויצוא</div>
+    <div class="actions">
+      <button id="download">הורד PDF</button>
+      <button class="ghost" id="print">הדפס</button>
+    </div>
+    <div id="pdf-area"></div>
+  </div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let workbook = null;
+let currentSheetData = null;
+
+// File upload
+const drop = $('drop');
+const fileInput = $('file');
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  $('file-name').textContent = 'נבחר: ' + file.name;
+  $('file-name').classList.remove('hidden');
+  // Auto-fill output filename from source
+  const baseName = file.name.replace(/\.[^.]+$/, '').trim();
+  const suggested = baseName ? `${baseName} - ברקודים` : 'ברקודים';
+  $('out-name').value = suggested;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const data = new Uint8Array(e.target.result);
+    workbook = XLSX.read(data, { type: 'array' });
+    populateSheetSelector();
+    $('map-panel').classList.remove('hidden');
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function populateSheetSelector() {
+  const sel = $('sheet');
+  sel.innerHTML = '';
+  workbook.SheetNames.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  sel.onchange = onSheetChange;
+  onSheetChange();
+}
+
+function onSheetChange() {
+  const name = $('sheet').value;
+  const ws = workbook.Sheets[name];
+  currentSheetData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  // Populate header row selector with up to first 10 rows
+  const hr = $('header-row');
+  hr.innerHTML = '<option value="-1">אין כותרת — השתמש בכל השורות</option>';
+  const limit = Math.min(10, currentSheetData.length);
+  for (let i = 0; i < limit; i++) {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `שורה ${i + 1}: ${(currentSheetData[i] || []).slice(0, 4).map(v => v == null ? '' : String(v)).join(' | ').substr(0, 60)}`;
+    hr.appendChild(opt);
+  }
+  hr.value = guessHeaderRow();
+  hr.onchange = populateColumnSelectors;
+  populateColumnSelectors();
+}
+
+function guessHeaderRow() {
+  // Pick the row with the most non-empty string cells in the first 10 rows
+  let best = -1, bestScore = 0;
+  for (let i = 0; i < Math.min(10, currentSheetData.length); i++) {
+    const row = currentSheetData[i] || [];
+    const score = row.filter(v => typeof v === 'string' && v.trim()).length;
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  return best;
+}
+
+function populateColumnSelectors() {
+  const hr = parseInt($('header-row').value);
+  const headerRow = hr >= 0 ? currentSheetData[hr] || [] : [];
+  // Determine column count by scanning all rows
+  let maxCols = 0;
+  currentSheetData.forEach(r => { if (r && r.length > maxCols) maxCols = r.length; });
+  const nameSel = $('col-name');
+  const codeSel = $('col-code');
+  nameSel.innerHTML = '';
+  codeSel.innerHTML = '';
+  for (let c = 0; c < maxCols; c++) {
+    const label = headerRow[c] != null && String(headerRow[c]).trim() ? String(headerRow[c]) : `עמודה ${c + 1}`;
+    [nameSel, codeSel].forEach(sel => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    });
+  }
+  // Guess columns: pick the col with longest avg strings for name, the col with most numbers/short codes for code
+  const colStats = [];
+  for (let c = 0; c < maxCols; c++) {
+    let textLen = 0, textCount = 0, numCount = 0;
+    currentSheetData.forEach((r, i) => {
+      if (hr >= 0 && i <= hr) return;
+      const v = r ? r[c] : null;
+      if (v == null) return;
+      const s = String(v).trim();
+      if (!s) return;
+      if (/^\d+$/.test(s) || typeof v === 'number') numCount++;
+      textLen += s.length;
+      textCount++;
+    });
+    colStats.push({ c, textLen, textCount, numCount, avg: textCount ? textLen / textCount : 0 });
+  }
+  // Name = highest avg string length
+  const nameGuess = colStats.slice().sort((a, b) => b.avg - a.avg)[0];
+  // Code = highest numCount, prefer different from name
+  const codeGuess = colStats.slice().sort((a, b) => b.numCount - a.numCount).find(s => s.c !== (nameGuess && nameGuess.c)) || colStats[0];
+  if (nameGuess) nameSel.value = nameGuess.c;
+  if (codeGuess) codeSel.value = codeGuess.c;
+  updateSummary();
+  ['col-name', 'col-code'].forEach(id => $(id).onchange = updateSummary);
+}
+
+function getItems() {
+  const hr = parseInt($('header-row').value);
+  const nameCol = parseInt($('col-name').value);
+  const codeCol = parseInt($('col-code').value);
+  const items = [];
+  currentSheetData.forEach((r, i) => {
+    if (!r) return;
+    if (hr >= 0 && i <= hr) return;
+    const name = r[nameCol];
+    const code = r[codeCol];
+    if (name == null && code == null) return;
+    const nameS = name != null ? String(name).trim() : '';
+    const codeS = code != null ? String(code).trim() : '';
+    if (!codeS) return;
+    items.push({ name: nameS, code: codeS });
+  });
+  return items;
+}
+
+function updateSummary() {
+  const items = getItems();
+  $('summary').textContent = `${items.length} פריטים יוכנסו לקובץ`;
+}
+
+$('build').onclick = build;
+
+function build() {
+  const items = getItems();
+  if (!items.length) {
+    alert('לא נמצאו פריטים. בדוק את הגדרות העמודות.');
+    return;
+  }
+  const cols = parseInt($('cols').value);
+  const rowsPerPage = parseInt($('rows').value);
+  const perPage = cols * rowsPerPage;
+  const format = $('bc-format').value;
+  const bcH = parseInt($('bc-height').value);
+
+  const area = $('pdf-area');
+  area.innerHTML = '';
+  for (let i = 0; i < items.length; i += perPage) {
+    const page = document.createElement('div');
+    page.className = 'page';
+    page.style.width = '210mm';
+    page.style.minHeight = '297mm';
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    grid.style.gridTemplateRows = `repeat(${rowsPerPage}, minmax(0, 1fr))`;
+    grid.style.height = `${297 - 24}mm`;
+    page.appendChild(grid);
+
+    for (let j = 0; j < perPage && (i + j) < items.length; j++) {
+      const it = items[i + j];
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+
+      const nm = document.createElement('div');
+      nm.className = 'name';
+      nm.textContent = it.name || ' ';
+      cell.appendChild(nm);
+
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      cell.appendChild(svg);
+      try {
+        JsBarcode(svg, it.code, {
+          format,
+          height: bcH,
+          width: 1.6,
+          margin: 0,
+          displayValue: false
+        });
+      } catch (e) {
+        cell.innerHTML += `<div style="color:#a33;font-size:11px">לא נוצר: ${e.message}</div>`;
+      }
+      const codeEl = document.createElement('div');
+      codeEl.className = 'code';
+      codeEl.textContent = it.code;
+      cell.appendChild(codeEl);
+
+      grid.appendChild(cell);
+    }
+    area.appendChild(page);
+  }
+
+  $('preview-panel').classList.remove('hidden');
+  $('preview-panel').scrollIntoView({ behavior: 'smooth' });
+}
+
+function buildFilename() {
+  let base = ($('out-name').value || '').trim();
+  if (!base) base = 'ברקודים';
+  // Strip a user-typed .pdf if present
+  base = base.replace(/\.pdf$/i, '');
+  if ($('add-date').value === '1') {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    base += ` ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  // Remove characters that some OSes dislike in filenames
+  base = base.replace(/[\/\\:*?"<>|]/g, '-');
+  return base + '.pdf';
+}
+
+$('download').onclick = () => {
+  const area = $('pdf-area');
+  const pages = area.querySelectorAll('.page');
+  if (!pages.length) return;
+  const wrap = document.createElement('div');
+  wrap.style.background = 'white';
+  pages.forEach(p => {
+    const clone = p.cloneNode(true);
+    clone.style.boxShadow = 'none';
+    clone.style.pageBreakAfter = 'always';
+    wrap.appendChild(clone);
+  });
+  html2pdf().set({
+    margin: 0,
+    filename: buildFilename(),
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 3, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak: { mode: ['css', 'legacy'] }
+  }).from(wrap).save();
+};
+
+$('print').onclick = () => {
+  window.print();
+};
+</script>
+</body>
+</html>
