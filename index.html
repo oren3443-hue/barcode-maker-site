@@ -545,6 +545,18 @@ function buildAssetFilename(ext, suffix) {
   return base + '.' + ext;
 }
 
+function isHebrew(s) {
+  return /[֐-׿]/.test(String(s || ''));
+}
+
+function applyRtlIfHebrew(textEl, content) {
+  if (isHebrew(content)) {
+    textEl.setAttribute('direction', 'rtl');
+    textEl.setAttribute('unicode-bidi', 'embed');
+    textEl.setAttribute('xml:lang', 'he');
+  }
+}
+
 function sanitizeForSvgId(s, idx) {
   const cleaned = String(s || '').trim()
     .replace(/\s+/g, '-')
@@ -629,6 +641,7 @@ $('download-assets-pdf').onclick = async () => {
         nameEl.setAttribute('font-weight', '500');
         nameEl.setAttribute('fill', '#1a1a1a');
         nameEl.textContent = item.name;
+        applyRtlIfHebrew(nameEl, item.name);
         svg.appendChild(nameEl);
       }
 
@@ -762,6 +775,7 @@ $('download-svg').onclick = () => {
         label.setAttribute('font-weight', '500');
         label.setAttribute('fill', '#1a1a1a');
         label.textContent = item.name;
+        applyRtlIfHebrew(label, item.name);
         g.appendChild(label);
       }
 
