@@ -464,26 +464,42 @@ function buildFilename() {
   return base + '.pdf';
 }
 
-$('download').onclick = () => {
+$('download').onclick = async () => {
   const area = $('pdf-area');
   const pages = area.querySelectorAll('.page');
   if (!pages.length) return;
-  const wrap = document.createElement('div');
-  wrap.style.background = 'white';
-  pages.forEach(p => {
-    const clone = p.cloneNode(true);
-    clone.style.boxShadow = 'none';
-    clone.style.pageBreakAfter = 'always';
-    wrap.appendChild(clone);
-  });
-  html2pdf().set({
-    margin: 0,
-    filename: buildFilename(),
-    image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 3, useCORS: true },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    pagebreak: { mode: ['css', 'legacy'] }
-  }).from(wrap).save();
+
+  const btn = $('download');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'מייצר PDF...';
+
+  try {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      const origShadow = page.style.boxShadow;
+      page.style.boxShadow = 'none';
+
+      const canvas = await html2canvas(page, {
+        scale: 3,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+
+      page.style.boxShadow = origShadow;
+
+      if (i > 0) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297);
+    }
+
+    pdf.save(buildFilename());
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
 };
 
 $('print').onclick = () => {
