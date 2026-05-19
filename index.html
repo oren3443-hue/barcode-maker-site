@@ -7,7 +7,8 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -118,8 +119,9 @@
   .cell svg { max-width: 100%; height: auto; display: block; }
   .cell .code { font-size: 11px; color: #444; font-family: monospace; margin-top: -2px; }
   .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
-  .actions-row { margin-top: 10px; }
-  .actions-label { font-size: 12px; color: #6a6a65; margin-left: 4px; }
+  .actions-divider { width: 1px; align-self: stretch; background: #e5e5e0; margin: 0 4px; }
+  .export-status { font-size: 13px; color: #2a6b3a; font-weight: 500; margin-right: 6px; }
+  .export-status.error { color: #a33; }
   .hidden { display: none; }
   .hint { font-size: 12px; color: #8a8a85; margin-top: 4px; }
   .page {
@@ -231,11 +233,10 @@
     <div class="actions">
       <button id="download">הורד PDF להדפסה</button>
       <button class="ghost" id="print">הדפס</button>
-    </div>
-    <div class="actions actions-row">
-      <span class="actions-label">למעצבים (קנבה / אדובי):</span>
+      <span class="actions-divider"></span>
       <button class="ghost" id="download-assets-pdf">PDF — דף לכל ברקוד</button>
       <button class="ghost" id="download-svg">SVG — קיט אחד</button>
+      <span class="export-status" id="export-status"></span>
     </div>
     <div id="pdf-area"></div>
   </div>
@@ -471,6 +472,16 @@ function buildFilename() {
   return base + '.pdf';
 }
 
+function setStatus(text, isError) {
+  const el = $('export-status');
+  el.textContent = text || '';
+  el.classList.toggle('error', !!isError);
+}
+
+function nextFrame() {
+  return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+}
+
 $('download').onclick = async () => {
   const area = $('pdf-area');
   const pages = area.querySelectorAll('.page');
@@ -480,12 +491,16 @@ $('download').onclick = async () => {
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'מייצר PDF...';
+  setStatus('');
 
   try {
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
 
     for (let i = 0; i < pages.length; i++) {
+      setStatus(`מייצר עמוד ${i + 1} מתוך ${pages.length}…`);
+      await nextFrame();
+
       const page = pages[i];
       const origShadow = page.style.boxShadow;
       page.style.boxShadow = 'none';
@@ -503,6 +518,9 @@ $('download').onclick = async () => {
     }
 
     pdf.save(buildFilename());
+    setStatus(`✓ נוצר PDF עם ${pages.length} עמודים`);
+  } catch (e) {
+    setStatus(`שגיאה: ${e.message}`, true);
   } finally {
     btn.disabled = false;
     btn.textContent = origText;
@@ -547,9 +565,10 @@ $('download-assets-pdf').onclick = async () => {
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'מייצר PDF...';
+  setStatus('');
 
   const sandbox = document.createElement('div');
-  sandbox.style.position = 'fixed';
+  sandbox.style.position = 'absolute';
   sandbox.style.left = '-99999px';
   sandbox.style.top = '0';
   sandbox.style.background = 'white';
@@ -557,10 +576,11 @@ $('download-assets-pdf').onclick = async () => {
 
   try {
     const { jsPDF } = window.jspdf;
-    // A6 landscape: 148 x 105 mm — clean designer-friendly page per barcode
     const pdf = new jsPDF({ unit: 'mm', format: 'a6', orientation: 'landscape' });
 
     for (let i = 0; i < items.length; i++) {
+      setStatus(`מייצר ברקוד ${i + 1} מתוך ${items.length}…`);
+      await nextFrame();
       const item = items[i];
 
       const page = document.createElement('div');
@@ -634,6 +654,9 @@ $('download-assets-pdf').onclick = async () => {
     }
 
     pdf.save(buildAssetFilename('pdf', '(אסטים)'));
+    setStatus(`✓ נוצר PDF עם ${items.length} ברקודים (דף לכל אחד)`);
+  } catch (e) {
+    setStatus(`שגיאה: ${e.message}`, true);
   } finally {
     document.body.removeChild(sandbox);
     btn.disabled = false;
@@ -652,6 +675,7 @@ $('download-svg').onclick = () => {
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'מייצר SVG...';
+  setStatus(`מייצר SVG עם ${items.length} ברקודים…`);
 
   try {
     const NS = 'http://www.w3.org/2000/svg';
@@ -768,6 +792,9 @@ $('download-svg').onclick = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    setStatus(`✓ נוצר SVG עם ${items.length} ברקודים (קבוצות נפרדות)`);
+  } catch (e) {
+    setStatus(`שגיאה: ${e.message}`, true);
   } finally {
     btn.disabled = false;
     btn.textContent = origText;
