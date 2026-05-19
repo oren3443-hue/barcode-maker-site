@@ -117,7 +117,9 @@
   }
   .cell svg { max-width: 100%; height: auto; display: block; }
   .cell .code { font-size: 11px; color: #444; font-family: monospace; margin-top: -2px; }
-  .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; }
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  .actions-row { margin-top: 10px; }
+  .actions-label { font-size: 12px; color: #6a6a65; margin-left: 4px; }
   .hidden { display: none; }
   .hint { font-size: 12px; color: #8a8a85; margin-top: 4px; }
   .page {
@@ -224,11 +226,16 @@
     </div>
   </div>
 
-  <div class="panel hidden" id="preview-panel">
+<div class="panel hidden" id="preview-panel">
     <div class="step-title"><span class="step-label">3</span> תצוגה מקדימה ויצוא</div>
     <div class="actions">
-      <button id="download">הורד PDF</button>
+      <button id="download">הורד PDF להדפסה</button>
       <button class="ghost" id="print">הדפס</button>
+    </div>
+    <div class="actions actions-row">
+      <span class="actions-label">למעצבים (קנבה / אדובי):</span>
+      <button class="ghost" id="download-assets-pdf">PDF — דף לכל ברקוד</button>
+      <button class="ghost" id="download-svg">SVG — קיט אחד</button>
     </div>
     <div id="pdf-area"></div>
   </div>
@@ -504,6 +511,267 @@ $('download').onclick = async () => {
 
 $('print').onclick = () => {
   window.print();
+};
+
+function buildAssetFilename(ext, suffix) {
+  let base = ($('out-name').value || '').trim();
+  if (!base) base = 'ברקודים';
+  base = base.replace(/\.(pdf|svg|zip)$/i, '');
+  if ($('add-date').value === '1') {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    base += ` ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  base = base.replace(/[\/\\:*?"<>|]/g, '-');
+  if (suffix) base += ` ${suffix}`;
+  return base + '.' + ext;
+}
+
+function sanitizeForSvgId(s, idx) {
+  const cleaned = String(s || '').trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\p{L}\p{N}_-]/gu, '');
+  const base = cleaned || `item`;
+  const safe = /^[\p{L}_]/u.test(base) ? base : `item-${base}`;
+  return `${safe}--${idx + 1}`;
+}
+
+$('download-assets-pdf').onclick = async () => {
+  const items = getItems();
+  if (!items.length) {
+    alert('לא נמצאו פריטים.');
+    return;
+  }
+  const format = $('bc-format').value;
+  const btn = $('download-assets-pdf');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'מייצר PDF...';
+
+  const sandbox = document.createElement('div');
+  sandbox.style.position = 'fixed';
+  sandbox.style.left = '-99999px';
+  sandbox.style.top = '0';
+  sandbox.style.background = 'white';
+  document.body.appendChild(sandbox);
+
+  try {
+    const { jsPDF } = window.jspdf;
+    // A6 landscape: 148 x 105 mm — clean designer-friendly page per barcode
+    const pdf = new jsPDF({ unit: 'mm', format: 'a6', orientation: 'landscape' });
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+
+      const page = document.createElement('div');
+      page.style.width = '148mm';
+      page.style.height = '105mm';
+      page.style.background = 'white';
+      page.style.display = 'flex';
+      page.style.flexDirection = 'column';
+      page.style.alignItems = 'center';
+      page.style.justifyContent = 'center';
+      page.style.padding = '10mm';
+      page.style.boxSizing = 'border-box';
+      page.style.gap = '6mm';
+      page.style.fontFamily = "'Heebo', 'Rubik', 'Arial Hebrew', sans-serif";
+      page.style.direction = 'rtl';
+
+      if (item.name) {
+        const nm = document.createElement('div');
+        nm.textContent = item.name;
+        nm.style.fontSize = '14pt';
+        nm.style.fontWeight = '500';
+        nm.style.textAlign = 'center';
+        nm.style.color = '#1a1a1a';
+        nm.style.maxWidth = '100%';
+        nm.style.wordBreak = 'break-word';
+        page.appendChild(nm);
+      }
+
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      page.appendChild(svg);
+      let rendered = true;
+      try {
+        JsBarcode(svg, item.code, {
+          format,
+          height: 90,
+          width: 2.6,
+          margin: 0,
+          displayValue: false
+        });
+        svg.style.maxWidth = '90%';
+        svg.style.height = 'auto';
+      } catch (e) {
+        rendered = false;
+        const err = document.createElement('div');
+        err.textContent = `לא נוצר ברקוד: ${e.message}`;
+        err.style.color = '#a33';
+        err.style.fontSize = '11pt';
+        page.appendChild(err);
+      }
+
+      const code = document.createElement('div');
+      code.textContent = item.code;
+      code.style.fontFamily = 'monospace';
+      code.style.fontSize = '11pt';
+      code.style.color = '#444';
+      code.style.direction = 'ltr';
+      page.appendChild(code);
+
+      sandbox.appendChild(page);
+
+      const canvas = await html2canvas(page, {
+        scale: 3,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+
+      if (i > 0) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 148, 105);
+
+      sandbox.removeChild(page);
+    }
+
+    pdf.save(buildAssetFilename('pdf', '(אסטים)'));
+  } finally {
+    document.body.removeChild(sandbox);
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+};
+
+$('download-svg').onclick = () => {
+  const items = getItems();
+  if (!items.length) {
+    alert('לא נמצאו פריטים.');
+    return;
+  }
+  const format = $('bc-format').value;
+  const btn = $('download-svg');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'מייצר SVG...';
+
+  try {
+    const NS = 'http://www.w3.org/2000/svg';
+    const cols = 3;
+    const cellW = 260;
+    const cellH = 140;
+    const padding = 24;
+    const labelH = 18;
+
+    const rows = Math.ceil(items.length / cols);
+    const totalW = cols * cellW + padding * 2;
+    const totalH = rows * cellH + padding * 2;
+
+    const master = document.createElementNS(NS, 'svg');
+    master.setAttribute('xmlns', NS);
+    master.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    master.setAttribute('width', totalW);
+    master.setAttribute('height', totalH);
+    master.setAttribute('viewBox', `0 0 ${totalW} ${totalH}`);
+
+    const title = document.createElementNS(NS, 'title');
+    title.textContent = ($('out-name').value || 'ברקודים') + ' — קיט';
+    master.appendChild(title);
+
+    const bg = document.createElementNS(NS, 'rect');
+    bg.setAttribute('width', '100%');
+    bg.setAttribute('height', '100%');
+    bg.setAttribute('fill', '#ffffff');
+    master.appendChild(bg);
+
+    items.forEach((item, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const x = padding + col * cellW;
+      const y = padding + row * cellH;
+
+      const g = document.createElementNS(NS, 'g');
+      g.setAttribute('id', sanitizeForSvgId(item.name || item.code, idx));
+      g.setAttribute('transform', `translate(${x}, ${y})`);
+
+      const gTitle = document.createElementNS(NS, 'title');
+      gTitle.textContent = `${item.name || ''} — ${item.code}`.trim();
+      g.appendChild(gTitle);
+
+      if (item.name) {
+        const label = document.createElementNS(NS, 'text');
+        label.setAttribute('x', cellW / 2);
+        label.setAttribute('y', 14);
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+        label.setAttribute('font-size', '12');
+        label.setAttribute('font-weight', '500');
+        label.setAttribute('fill', '#1a1a1a');
+        label.textContent = item.name;
+        g.appendChild(label);
+      }
+
+      const tempSvg = document.createElementNS(NS, 'svg');
+      try {
+        JsBarcode(tempSvg, item.code, {
+          format,
+          height: 70,
+          width: 2,
+          margin: 0,
+          displayValue: false
+        });
+        const bcW = parseFloat(tempSvg.getAttribute('width')) || cellW - 40;
+        const bcH = parseFloat(tempSvg.getAttribute('height')) || 70;
+        const scale = Math.min(1, (cellW - 30) / bcW);
+        const drawnW = bcW * scale;
+        const drawnH = bcH * scale;
+        const bcX = (cellW - drawnW) / 2;
+        const bcY = labelH + 8;
+
+        const bcGroup = document.createElementNS(NS, 'g');
+        bcGroup.setAttribute('class', 'barcode');
+        bcGroup.setAttribute('transform', `translate(${bcX}, ${bcY}) scale(${scale})`);
+        while (tempSvg.firstChild) {
+          bcGroup.appendChild(tempSvg.firstChild);
+        }
+        g.appendChild(bcGroup);
+
+        const codeText = document.createElementNS(NS, 'text');
+        codeText.setAttribute('x', cellW / 2);
+        codeText.setAttribute('y', bcY + drawnH + 14);
+        codeText.setAttribute('text-anchor', 'middle');
+        codeText.setAttribute('font-family', 'monospace');
+        codeText.setAttribute('font-size', '11');
+        codeText.setAttribute('fill', '#444');
+        codeText.textContent = item.code;
+        g.appendChild(codeText);
+      } catch (e) {
+        const err = document.createElementNS(NS, 'text');
+        err.setAttribute('x', cellW / 2);
+        err.setAttribute('y', cellH / 2);
+        err.setAttribute('text-anchor', 'middle');
+        err.setAttribute('fill', '#a33');
+        err.setAttribute('font-size', '11');
+        err.textContent = `שגיאה: ${item.code}`;
+        g.appendChild(err);
+      }
+
+      master.appendChild(g);
+    });
+
+    const serializer = new XMLSerializer();
+    const svgStr = '<?xml version="1.0" encoding="UTF-8"?>\n' + serializer.serializeToString(master);
+    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = buildAssetFilename('svg', '(קיט)');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
 };
 </script>
 </body>
