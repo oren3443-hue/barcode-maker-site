@@ -554,6 +554,30 @@ function sanitizeForSvgId(s, idx) {
   return `${safe}--${idx + 1}`;
 }
 
+async function svgToJpegDataUrl(svgEl, rasterW, rasterH) {
+  const xml = new XMLSerializer().serializeToString(svgEl);
+  const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error('לא ניתן להמיר SVG לתמונה'));
+      img.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = rasterW;
+    canvas.height = rasterH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, rasterW, rasterH);
+    ctx.drawImage(img, 0, 0, rasterW, rasterH);
+    return canvas.toDataURL('image/jpeg', 0.95);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 $('download-assets-pdf').onclick = async () => {
   const items = getItems();
   if (!items.length) {
@@ -567,90 +591,99 @@ $('download-assets-pdf').onclick = async () => {
   btn.textContent = 'מייצר PDF...';
   setStatus('');
 
-  const sandbox = document.createElement('div');
-  sandbox.style.position = 'absolute';
-  sandbox.style.left = '-99999px';
-  sandbox.style.top = '0';
-  sandbox.style.background = 'white';
-  document.body.appendChild(sandbox);
-
   try {
     const { jsPDF } = window.jspdf;
+    // A6 landscape: 148×105mm — clean page per barcode, drag-friendly in Canva/Adobe
     const pdf = new jsPDF({ unit: 'mm', format: 'a6', orientation: 'landscape' });
+    const NS = 'http://www.w3.org/2000/svg';
+    const W_MM = 148, H_MM = 105;
+    const VB_W = 600, VB_H = 420;            // SVG internal coords (≈4×mm)
+    const rasterW = Math.round(W_MM * 96 / 25.4 * 3);  // 3× DPI for crispness
+    const rasterH = Math.round(H_MM * 96 / 25.4 * 3);
 
     for (let i = 0; i < items.length; i++) {
       setStatus(`מייצר ברקוד ${i + 1} מתוך ${items.length}…`);
       await nextFrame();
       const item = items[i];
 
-      const page = document.createElement('div');
-      page.style.width = '148mm';
-      page.style.height = '105mm';
-      page.style.background = 'white';
-      page.style.display = 'flex';
-      page.style.flexDirection = 'column';
-      page.style.alignItems = 'center';
-      page.style.justifyContent = 'center';
-      page.style.padding = '10mm';
-      page.style.boxSizing = 'border-box';
-      page.style.gap = '6mm';
-      page.style.fontFamily = "'Heebo', 'Rubik', 'Arial Hebrew', sans-serif";
-      page.style.direction = 'rtl';
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('xmlns', NS);
+      svg.setAttribute('viewBox', `0 0 ${VB_W} ${VB_H}`);
+      svg.setAttribute('width', `${W_MM}mm`);
+      svg.setAttribute('height', `${H_MM}mm`);
 
+      const bg = document.createElementNS(NS, 'rect');
+      bg.setAttribute('width', VB_W);
+      bg.setAttribute('height', VB_H);
+      bg.setAttribute('fill', '#ffffff');
+      svg.appendChild(bg);
+
+      // Product name (top — for identification only, not part of the design asset)
       if (item.name) {
-        const nm = document.createElement('div');
-        nm.textContent = item.name;
-        nm.style.fontSize = '14pt';
-        nm.style.fontWeight = '500';
-        nm.style.textAlign = 'center';
-        nm.style.color = '#1a1a1a';
-        nm.style.maxWidth = '100%';
-        nm.style.wordBreak = 'break-word';
-        page.appendChild(nm);
+        const nameEl = document.createElementNS(NS, 'text');
+        nameEl.setAttribute('x', VB_W / 2);
+        nameEl.setAttribute('y', 48);
+        nameEl.setAttribute('text-anchor', 'middle');
+        nameEl.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+        nameEl.setAttribute('font-size', '22');
+        nameEl.setAttribute('font-weight', '500');
+        nameEl.setAttribute('fill', '#1a1a1a');
+        nameEl.textContent = item.name;
+        svg.appendChild(nameEl);
       }
 
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      page.appendChild(svg);
-      let rendered = true;
+      // Barcode (centered, sized to fit)
+      const tempSvg = document.createElementNS(NS, 'svg');
       try {
-        JsBarcode(svg, item.code, {
+        JsBarcode(tempSvg, item.code, {
           format,
-          height: 90,
-          width: 2.6,
+          height: 150,
+          width: 3,
           margin: 0,
           displayValue: false
         });
-        svg.style.maxWidth = '90%';
-        svg.style.height = 'auto';
+        const bcW = parseFloat(tempSvg.getAttribute('width')) || 400;
+        const bcH = parseFloat(tempSvg.getAttribute('height')) || 150;
+        const maxW = VB_W - 80;
+        const maxH = VB_H - 160;
+        const fit = Math.min(1, maxW / bcW, maxH / bcH);
+        const drawnW = bcW * fit;
+        const drawnH = bcH * fit;
+        const bcX = (VB_W - drawnW) / 2;
+        const bcY = (VB_H - drawnH) / 2 + 8;
+
+        const bcGroup = document.createElementNS(NS, 'g');
+        bcGroup.setAttribute('transform', `translate(${bcX}, ${bcY}) scale(${fit})`);
+        while (tempSvg.firstChild) {
+          bcGroup.appendChild(tempSvg.firstChild);
+        }
+        svg.appendChild(bcGroup);
       } catch (e) {
-        rendered = false;
-        const err = document.createElement('div');
-        err.textContent = `לא נוצר ברקוד: ${e.message}`;
-        err.style.color = '#a33';
-        err.style.fontSize = '11pt';
-        page.appendChild(err);
+        const err = document.createElementNS(NS, 'text');
+        err.setAttribute('x', VB_W / 2);
+        err.setAttribute('y', VB_H / 2);
+        err.setAttribute('text-anchor', 'middle');
+        err.setAttribute('fill', '#a33');
+        err.setAttribute('font-size', '18');
+        err.textContent = `שגיאה: ${e.message}`;
+        svg.appendChild(err);
       }
 
-      const code = document.createElement('div');
-      code.textContent = item.code;
-      code.style.fontFamily = 'monospace';
-      code.style.fontSize = '11pt';
-      code.style.color = '#444';
-      code.style.direction = 'ltr';
-      page.appendChild(code);
+      // Code value (bottom)
+      const codeEl = document.createElementNS(NS, 'text');
+      codeEl.setAttribute('x', VB_W / 2);
+      codeEl.setAttribute('y', VB_H - 28);
+      codeEl.setAttribute('text-anchor', 'middle');
+      codeEl.setAttribute('font-family', 'monospace');
+      codeEl.setAttribute('font-size', '18');
+      codeEl.setAttribute('fill', '#444');
+      codeEl.textContent = item.code;
+      svg.appendChild(codeEl);
 
-      sandbox.appendChild(page);
-
-      const canvas = await html2canvas(page, {
-        scale: 3,
-        useCORS: true,
-        backgroundColor: '#ffffff'
-      });
+      const dataUrl = await svgToJpegDataUrl(svg, rasterW, rasterH);
 
       if (i > 0) pdf.addPage();
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 148, 105);
-
-      sandbox.removeChild(page);
+      pdf.addImage(dataUrl, 'JPEG', 0, 0, W_MM, H_MM);
     }
 
     pdf.save(buildAssetFilename('pdf', '(אסטים)'));
@@ -658,7 +691,6 @@ $('download-assets-pdf').onclick = async () => {
   } catch (e) {
     setStatus(`שגיאה: ${e.message}`, true);
   } finally {
-    document.body.removeChild(sandbox);
     btn.disabled = false;
     btn.textContent = origText;
   }
