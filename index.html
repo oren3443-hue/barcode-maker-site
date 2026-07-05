@@ -441,7 +441,10 @@ function build() {
           displayValue: false
         });
       } catch (e) {
-        cell.innerHTML += `<div style="color:#a33;font-size:11px">לא נוצר: ${e.message}</div>`;
+        const errEl = document.createElement('div');
+        errEl.style.cssText = 'color:#a33;font-size:11px';
+        errEl.textContent = `לא נוצר: ${e.message}`;
+        cell.appendChild(errEl);
       }
       const codeEl = document.createElement('div');
       codeEl.className = 'code';
